@@ -4,6 +4,14 @@
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_Sensor.h>
 #include "dht.h"
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define SS_PIN 3
+#define RST_PIN 4
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+int Cartao = 0;
 
 #define M11 5
 #define M12 6
@@ -28,13 +36,13 @@ dht DHT;
 float u,t;
 
 int PinTrigger = 2;
-int PinEcho = 3;
+int PinEcho = 14;
 int duration, distance;
 
 const int MPU=0x68;
 int AcX,AcY,AcZ,Tmp,GyX,GyY,GyZ;
 
-#define SensorVelocidade 13
+#define SensorVelocidade A1
 int rpm;
 volatile byte pulsos;
 unsigned int pulsos_por_volta = 20;
@@ -42,7 +50,7 @@ void contador(){
 pulsos++;
 }
 
-#define Buzzer A0
+#define Buzzer A2
 
 void frente(){
   digitalWrite(M11, LOW);
@@ -96,6 +104,8 @@ void setup(){
   pinMode(SensorVelocidade, INPUT);
   pinMode(Buzzer, OUTPUT);
   digitalWrite(Buzzer, HIGH);
+  SPI.begin();
+  rfid.PCD_Init();
 
   attachInterrupt(0, contador, FALLING);
   pulsos = 0;
@@ -106,9 +116,6 @@ void setup(){
   Wire.write(0x6B); 
   Wire.write(0); 
   Wire.endTransmission(true);
-
-  //SPI.begin();
-  //mfrc522.PCD_Init();
 
   pinMode(InfraVermelho, INPUT);
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
@@ -129,6 +136,7 @@ void setup(){
 void loop() {
   parar();
   while(IF == 1){
+    Cartao = 0;
     SensoresSecundarios();
     AcelerometroGiroscopio();
     SensorVel();
@@ -159,26 +167,40 @@ void loop() {
     SensorVel();
     OLED();
     Ultrassom();
-    if(distance > 30){
+    if(Cartao == 0){
+      if(distance > 30){
       velocidade = 120;
       esquerda();
+      }
+      if(distance<=30 && distance > 15){
+        velocidade = 60;
+        frente();
+      }
+      if(distance<=15 && distance > 3){
+        velocidade = 30;
+        frente();
+      }
+      if(distance<=3){
+        parar();
+        if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) //VERIFICA SE O CARTÃO PRESENTE NO LEITOR É DIFERENTE DO ÚLTIMO CARTÃO LIDO. CASO NÃO SEJA, FAZ
+          return; //RETORNA PARA LER NOVAMENTE
+        LeituraTag();
+      }
     }
-    if(distance<=30 && distance > 15){
-      velocidade = 60;
-      frente();
-    }
-    if(distance<=15 && distance > 3){
-      velocidade = 30;
-      frente();
-    }
-    if(distance<=3){
-      parar();
+    if(Cartao == 1){
+      velocidade = 200;
+      tras();
+      digitalWrite(Buzzer, LOW);
     }
     IF = digitalRead(InfraVermelho);
   }
 }
 
-
+void LeituraTag(){
+  rfid.PICC_HaltA(); //PARADA DA LEITURA DO CARTÃO
+  rfid.PCD_StopCrypto1(); //PARADA DA CRIPTOGRAFIA NO PCD
+  Cartao = 1;
+}
 
 void OLED(){
   static unsigned long TempoOLED;
