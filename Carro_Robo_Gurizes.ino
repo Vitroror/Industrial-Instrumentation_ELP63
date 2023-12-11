@@ -7,19 +7,18 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
-#define SS_PIN 3
-#define RST_PIN 4
+#define RST_PIN    7
+#define SS_PIN     8
 
 MFRC522 rfid(SS_PIN, RST_PIN);
-int Cartao = 0;
 
 #define M11 5
 #define M12 6
-#define M21 7
-#define M22 8
+#define M21 9
+#define M22 10
 int velocidade = 255;
 
-SoftwareSerial bluetooth(10, 9); //TX, RX (Bluetooth)
+SoftwareSerial bluetooth(4, 3);
 char MovimentoRobo;
 
 #define InfraVermelho 0
@@ -36,48 +35,40 @@ dht DHT;
 float u,t;
 
 int PinTrigger = 2;
-int PinEcho = 14;
+int PinEcho = A0;
 int duration, distance;
 
 const int MPU=0x68;
 int AcX,AcY,AcZ,Tmp,GyX,GyY,GyZ;
 
-#define SensorVelocidade A1
-int rpm;
-volatile byte pulsos;
-unsigned int pulsos_por_volta = 20;
-void contador(){
-pulsos++;
-}
-
 #define Buzzer A2
 
 void frente(){
   digitalWrite(M11, LOW);
-  digitalWrite(M12, velocidade);
-  digitalWrite(M21, velocidade);
+  analogWrite(M12, velocidade);
+  analogWrite(M21, velocidade);
   digitalWrite(M22, LOW);
 }
 
 void tras(){
-  digitalWrite(M11, velocidade);
+  analogWrite(M11, velocidade);
   digitalWrite(M12, LOW);
   digitalWrite(M21, LOW);
-  digitalWrite(M22, velocidade);
-}
-
-void esquerda(){
-  digitalWrite(M11, velocidade);
-  digitalWrite(M12, LOW);
-  digitalWrite(M21, velocidade);
-  digitalWrite(M22, LOW);
+  analogWrite(M22, velocidade);
 }
 
 void direita(){
+  analogWrite(M11, velocidade);
+  digitalWrite(M12, LOW);
+  analogWrite(M21, velocidade);
+  digitalWrite(M22, LOW);
+}
+
+void esquerda(){
   digitalWrite(M11, LOW);
-  digitalWrite(M12, velocidade);
+  analogWrite(M12, velocidade);
   digitalWrite(M21, LOW);
-  digitalWrite(M22, velocidade);
+  analogWrite(M22, velocidade);
 }
 
 void parar(){
@@ -91,6 +82,9 @@ void setup(){
   bluetooth.begin(115200);
   Serial.begin(9600);
 
+  SPI.begin();
+  rfid.PCD_Init();
+  
   pinMode(M11, OUTPUT);
   pinMode(M12, OUTPUT);
   pinMode(M21, OUTPUT);
@@ -101,16 +95,9 @@ void setup(){
   digitalWrite(M22, LOW);
   pinMode(PinTrigger, OUTPUT);
   pinMode(PinEcho, INPUT); 
-  pinMode(SensorVelocidade, INPUT);
   pinMode(Buzzer, OUTPUT);
   digitalWrite(Buzzer, HIGH);
-  SPI.begin();
-  rfid.PCD_Init();
-
-  attachInterrupt(0, contador, FALLING);
-  pulsos = 0;
-  rpm = 0;
-
+  
   Wire.begin();
   Wire.beginTransmission(MPU);
   Wire.write(0x6B); 
@@ -135,71 +122,68 @@ void setup(){
 
 void loop() {
   parar();
-  while(IF == 1){
-    Cartao = 0;
+  IF = digitalRead(InfraVermelho);
+  while(IF == 0){
+    digitalWrite(SS_PIN, LOW);
+    digitalWrite(RST_PIN, LOW);
     SensoresSecundarios();
     AcelerometroGiroscopio();
-    SensorVel();
     OLED();
-    MovimentoRobo = bluetooth.read();
     digitalWrite(Buzzer, HIGH);
-    velocidade = 255;
-    if (MovimentoRobo == 'w'){
-    frente();
-    }
-    if (MovimentoRobo == 'd'){
-      direita();
-    }
-    if (MovimentoRobo == 's'){
-      tras();
-    }
-    if (MovimentoRobo == 'a'){
-      esquerda();
-    }
-    if (MovimentoRobo == 'z'){
-      parar();
-    }
+    if (bluetooth.available()){
+      MovimentoRobo = bluetooth.read();
+      if (MovimentoRobo == 'w'){
+        velocidade = 255;
+        frente();
+        }
+        if (MovimentoRobo == 'd'){
+          velocidade = 255;
+          direita();
+        }
+        if (MovimentoRobo == 's'){
+          velocidade = 255;
+          tras();
+        }
+        if (MovimentoRobo == 'a'){
+          velocidade = 255;
+          esquerda();
+        }
+        if (MovimentoRobo == 'z'){
+          parar();
+        }
+    } 
     IF = digitalRead(InfraVermelho);
   }
-  while(IF == 0){
+  while(IF == 1){
+    digitalWrite(SS_PIN, HIGH);
+    digitalWrite(RST_PIN, HIGH);
     SensoresSecundarios();
     AcelerometroGiroscopio();
-    SensorVel();
     OLED();
     Ultrassom();
-    if(Cartao == 0){
-      if(distance > 30){
+    if(distance > 46){
       velocidade = 120;
-      esquerda();
-      }
-      if(distance<=30 && distance > 15){
-        velocidade = 60;
-        frente();
-      }
-      if(distance<=15 && distance > 3){
-        velocidade = 30;
-        frente();
-      }
-      if(distance<=3){
-        parar();
-        if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) //VERIFICA SE O CARTÃO PRESENTE NO LEITOR É DIFERENTE DO ÚLTIMO CARTÃO LIDO. CASO NÃO SEJA, FAZ
-          return; //RETORNA PARA LER NOVAMENTE
-        LeituraTag();
-      }
+      direita();
     }
-    if(Cartao == 1){
-      velocidade = 200;
-      tras();
-      digitalWrite(Buzzer, LOW);
+    if(distance<=45 && distance > 4){
+      velocidade = 255;
+      frente();
+    }
+    if(distance<=4){
+      parar();
+      if(rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+        bluetooth.println("TagLida");
+        while(IF == 1){
+          digitalWrite(Buzzer, LOW);
+          velocidade = 220;
+          tras();
+          IF = digitalRead(InfraVermelho);
+        }
+        rfid.PICC_HaltA();
+      }
     }
     IF = digitalRead(InfraVermelho);
   }
-}
-
-void LeituraTag(){
-  rfid.PICC_HaltA(); //PARADA DA LEITURA DO CARTÃO
-  rfid.PCD_StopCrypto1(); //PARADA DA CRIPTOGRAFIA NO PCD
-  Cartao = 1;
 }
 
 void OLED(){
@@ -215,10 +199,6 @@ void OLED(){
     display.setTextColor(1);
     display.setCursor(4, 8);
     display.print("UMIDADE:" + String(u)+ "%");
-    display.setTextSize(1);
-    display.setTextColor(1);
-    display.setCursor(4, 18);
-    display.print("RPM: " +String(rpm));
     display.display();
 
     TempoOLED = millis();
@@ -275,16 +255,5 @@ void AcelerometroGiroscopio(){
     bluetooth.print(";");
     bluetooth.println(GyZ);
     TempoSensor = millis();
-  }
-}
-
-void SensorVel(){
-  static unsigned long TempoVel;
-  if (millis() - TempoVel >= 1000){
-    detachInterrupt(0);
-    rpm = ((60 * 1000) / pulsos_por_volta ) /((millis() - TempoVel) * pulsos);
-    pulsos = 0;
-    TempoVel = millis();
-    attachInterrupt(0, contador, FALLING);
   }
 }
